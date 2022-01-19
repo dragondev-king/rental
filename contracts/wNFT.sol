@@ -41,6 +41,9 @@ contract wNFT is Ownable, IERC721Receiver, ERC721Enumerable, ReentrancyGuard {
   /// @dev owner address => amount
   mapping(address => uint256) public ownerBalance;
 
+  /// @dev service fee balance
+    uint256 public serviceFeeBalance;
+
   ///@dev servie fee percentage
   uint256 public serviceFeeRatio;
 
@@ -160,5 +163,138 @@ contract wNFT is Ownable, IERC721Receiver, ERC721Enumerable, ReentrancyGuard {
     delete wraps[tokenId];
 
     emit Unregistered(msg.sender, nftAddr, tokenId);
+  }
+
+  /**
+    * @dev Sends a rent request with upfront
+    * @param tokenId wrap token id
+    * @param rentalPeriodInDays rental period in days
+    */
+  function requestRent(uint256 tokenId, uint256 rentalPeriodInDays)
+    external
+    payable
+    onlyValidToken(tokenId)
+  {
+    Wrap storage wrap = wraps[tokenId];
+
+    require(tokenStatus(tokenId) == WrapStatus.FREE, "wNFT: token in rent");
+    require(wrap.minRentalPeriod < rentalPeriodInDays, "wNFT: out of minimal rental period");
+    require(wrap.maxRentalPeriod > rentalPeriodInDays, "wNFT: out of maximal rental period");
+    require(msg.value == rentalPeriodInDays * wrap.dailyRate, "wNFT: invalid upfront amount");
+
+    wrap.rentalPeriod = rentalPeriodInDays;
+    wrap.renter = msg.sender;
+    
+    emit RentRequested(msg.sender, wrap.owner, tokenId, wrap);
+  }
+
+  /**
+    * @dev Approves the request rent and initiates the rent if approved
+    * @param tokenId wrap token id
+    * @param approve approve or deny
+    */
+  function approveRentRequest(uint256 tokenId, bool approve) external onlyValidToken(tokenId) nonReentrant {
+    Wrap storage wrap = wraps[tokenId];
+
+    require(wrap.owner == msg.sender, "wNFT: caller is not the token owner");
+    require(tokenStatus(tokenId) == WrapStatus.REQUEST_PENDING, "wNFT: not request");
+
+    if(approve) {
+      wrap.rentStarted = block.timestamp;
+      ERC721._transfer(address(this), wrap.renter, tokenId);
+      emit RentStarted(wrap.renter, msg.sender, tokenId, wrap);
+    } else {
+      //refund the upfront if the request is not approved
+      address renter = wrap.renter;
+      wrap.renter = address(0);
+
+      bool success;
+      (success, ) = payable(renter).call{
+        value: wrap.rentalPeriod * wrap.dailyRate
+      }("");
+      require(success);
+      emit RentDenied(wrap.renter, msg.sender, tokenId, wrap);
+    }
+  }
+
+  /**
+    * @dev Sets service fee ratio
+    * @param percentage ratio
+    */
+  function setServiceFeeRatio(uint256 percentage) external onlyOwner {
+    require(percentage < 100, "wNFT: invalid service fee");
+    serviceFeeRatio = percentage;
+
+    emit ServiceFeeRatioSet(percentage);
+  }
+
+  /**
+    * @dev Complete rent
+    * @param tokenId wrap token id
+    */
+  function completeRent(uint256 tokenId) external onlyValidToken(tokenId) nonReentrant {
+    require(tokenStatus(tokenId) == WrapStatus.RENTAL_OVER, "wNFT: only rent-overed token");
+    Wrap storage wrap = wraps[tokenId];
+    address renter = wrap.renter;
+    uint256 rentalFee = wrap.rentalPeriod * wrap.dailyRate;
+
+    wrap.renter = address(0);
+    ERC721._transfer(renter, address(this), tokenId);
+
+    uint256 serviceFees = (rentalFee * serviceFeeRatio) / 100;
+    uint256 netRentalFeeToOwner = rentalFee - serviceFees;
+
+    ownerBalance[wrap.owner] += netRentalFeeToOwner;
+    serviceFeeBalance += serviceFees;
+
+    emit RentEnded(renter, wrap.owner, tokenId, wrap);
+  }
+
+  function tokenURI(uint256 tokenId) public view override onlyValidToken(tokenId) returns (string memory) {
+    Wrap storage wrap = wraps[tokenId];
+    return wrap.nftAddr.tokenURI(wrap.tokenId);
+  }
+
+  function _transfer(address, address, uint256) internal pure override {
+    revert("wNFT: can't transfer");
+  }
+
+  function withdrawOwnerBalance(address owner) external nonReentrant {
+    uint256 amount = ownerBalance[owner];
+    if (amount > 0) {
+      ownerBalance[owner] = 0;
+      (bool success, ) = payable(owner).call{value: amount}("");
+      require(success);
+
+      emit ownerBalanceWithdrawn(owner, amount);
+    }
+  }
+
+  function withdrawServiceFeeBalance(address recipient) external onlyOwner nonReentrant {
+    uint256 amount = serviceFeeBalance;
+    if(amount > 0) {
+      serviceFeeBalance = 0;
+      (bool success, ) = payable(recipient).call{value: amount}("");
+      require(success);
+
+      emit ServiceFeeBalanceWithdrawn(recipient, amount);
+    }
+  }
+
+  /**
+    * @dev {IERC721Receiver-onERC721Received}
+    *      This function ensures wNFT can mint tokens to itself, or be an owner of another NFT
+    */
+  function onERC721Received(
+    address operator,
+    address from,
+    uint256,
+    bytes calldata
+  ) external view override returns (bytes4) {
+    if (operator == address(this) || from == address(0)) {
+      return IERC721Receiver.onERC721Received.selector;
+    } else {
+      return 0x00;
+    }
   }
 }

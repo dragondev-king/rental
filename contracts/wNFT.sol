@@ -119,8 +119,8 @@ contract wNFT is Ownable, IERC721Receiver, ERC721Enumerable, ReentrancyGuard {
     address owner = IERC721URI(nftAddr).ownerOf(tokenId);
     
     require(msg.sender == owner, "wNFT: caller is not the owner of the NFT");
-    require(minRentalPeriod > 0, "wNFT: zero min reltal period");
-    require(minRentalPeriod < maxRentalPeriod, "wNFT: invalid max reltal period");
+    require(minRentalPeriod > 0, "wNFT: zero min rental period");
+    require(minRentalPeriod < maxRentalPeriod, "wNFT: invalid max rental period");
     require(dailyRate > 0, "wNFT: zero daily rate");
 
     uint256 newTokenId = tokenIdTracker;
@@ -197,7 +197,7 @@ contract wNFT is Ownable, IERC721Receiver, ERC721Enumerable, ReentrancyGuard {
     Wrap storage wrap = wraps[tokenId];
 
     require(wrap.owner == msg.sender, "wNFT: caller is not the token owner");
-    require(tokenStatus(tokenId) == WrapStatus.REQUEST_PENDING, "wNFT: not request");
+    require(tokenStatus(tokenId) == WrapStatus.REQUEST_PENDING, "wNFT: not requested");
 
     if(approve) {
       wrap.rentStarted = block.timestamp;

@@ -62,7 +62,7 @@ contract wNFT is Ownable, IERC721Receiver, ERC721Enumerable, ReentrancyGuard {
 
   event ServiceFeeRatioSet(uint256 percentage);
 
-  event ownerBalanceWithdrawn(address owner, uint256 amount);
+  event OwnerBalanceWithdrawn(address owner, uint256 amount);
 
   event ServiceFeeBalanceWithdrawn(address recipient, uint256 amount);
 
@@ -266,7 +266,7 @@ contract wNFT is Ownable, IERC721Receiver, ERC721Enumerable, ReentrancyGuard {
       (bool success, ) = payable(owner).call{value: amount}("");
       require(success);
 
-      emit ownerBalanceWithdrawn(owner, amount);
+      emit OwnerBalanceWithdrawn(owner, amount);
     }
   }
 

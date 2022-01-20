@@ -314,4 +314,122 @@ describe('wnfT', () => {
       .withArgs(this.nftOwner.address, this.mockNFT.address, tokenId)
   })
 
+  it('setServiceFeeRatio function fails', async () => {
+    const percentage = 200
+
+    await expect(this.wnft.connect(this.nftOwner).setServiceFeeRatio(
+      percentage
+    )).to.revertedWith('wNFT: invalid service fee')
+  })
+
+  it('setServiceFeeRatio function succeeds', async () => {
+    const percentage = serviceFeeRatio
+
+    await expect(this.wnft.connect(this.nftOwner).setServiceFeeRatio(
+      percentage
+    )).to.emit(this.wnft, 'ServiceFeeRatioSet')
+      .withArgs(percentage)
+  })
+
+  it('completeRent function fails', async () => {
+    const tokenId1 = 1 //free
+
+    await expect(this.wnft.connect(this.nftOwner).completeRent(
+      tokenId1
+    )).to.revertedWith('wNFT: only rent-overed token')
+  })
+
+  it('completeRent function succeeds', async () => {
+    const tokenId2 = 2
+    const renter = ethers.constants.AddressZero
+
+    const wrap = await this.wnft.wraps(tokenId2)
+
+
+    await network.provider.send("evm_increaseTime", [864000])
+    await network.provider.send("evm_mine")
+
+    expect((
+      await this.wnft.tokenStatus(tokenId2))
+    ).to.equal(tokenStatus.RENTAL_OVER)
+
+    expect((await this.wnft.ownerBalance(wrap[tokenId2])).toNumber())
+    .to.equal(0)
+
+    expect((await this.wnft.serviceFeeBalance()).toNumber())
+    .to.equal(0)
+
+    await expect(this.wnft.connect(this.nftOwner).completeRent(
+      tokenId2
+    )).to.emit(this.wnft, 'RentEnded')
+      .withArgs(
+        wrap.renter,
+        wrap.owner,
+        tokenId2,
+        [
+          wrap[0],
+          renter,
+          wrap[2],
+          wrap[3],
+          wrap[4],
+          wrap[5],
+          wrap[6],
+          wrap[7],
+          wrap[8]
+        ]
+      )
+    
+    const serviceFeeRatio = (await this.wnft.serviceFeeRatio()).toNumber()
+    const rentalFee = wrap.rentalPeriod * wrap.dailyRate
+
+    expect(await this.wnft.tokenStatus(tokenId2))
+    .to.equal(tokenStatus.FREE)
+
+    expect((await this.wnft.ownerBalance(wrap[tokenId2])).toNumber())
+    .to.equal(rentalFee - rentalFee * serviceFeeRatio / 100)
+
+    expect((await this.wnft.serviceFeeBalance()).toNumber())
+    .to.equal(rentalFee * serviceFeeRatio / 100)
+  })
+
+  it('withdrawOwnerBalance function succeeds', async () => {
+    const tokenId2 = 2
+    const wrap = await this.wnft.wraps(tokenId2)
+    const serviceFeeRatio = (await this.wnft.serviceFeeRatio()).toNumber()
+    const rentalFee = wrap.rentalPeriod * wrap.dailyRate
+    const ownerBalance = await this.wnft.ownerBalance(wrap[tokenId2])
+
+    expect((await this.wnft.ownerBalance(wrap[tokenId2])).toNumber())
+    .to.equal(rentalFee - rentalFee * serviceFeeRatio / 100)
+
+    await expect(this.wnft.connect(this.nftOwner).withdrawOwnerBalance(
+      wrap[2]
+    )).to.emit(this.wnft, 'OwnerBalanceWithdrawn')
+      .withArgs(wrap[2], ownerBalance)
+
+    expect(
+      (await this.wnft.ownerBalance(wrap[tokenId2])).toNumber()
+    ).to.equal(0)
+  })
+
+  it('withdrawServiceFeeBalance function succeeds', async () => {
+    const tokenId2 = 2
+    const [bob] = this.users
+    const wrap = await this.wnft.wraps(tokenId2)
+    const serviceFeeRatio = (await this.wnft.serviceFeeRatio()).toNumber()
+    const rentalFee = wrap.rentalPeriod * wrap.dailyRate
+
+    const serviceFeeBalance = (await this.wnft.serviceFeeBalance()).toNumber()
+
+    expect((await this.wnft.serviceFeeBalance()).toNumber())
+    .to.equal(rentalFee * serviceFeeRatio / 100)
+
+    await expect(this.wnft.connect(this.nftOwner).withdrawServiceFeeBalance(
+      bob.address
+    )).to.emit(this.wnft, 'ServiceFeeBalanceWithdrawn')
+      .withArgs(bob.address, serviceFeeBalance)
+
+    expect((await this.wnft.serviceFeeBalance()).toNumber())
+    .to.equal(0)
+  })
 })
